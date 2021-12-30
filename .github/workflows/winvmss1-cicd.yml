@@ -77,7 +77,7 @@ jobs:
       env:
         keyvault: ${{ secrets.IAC_KEYVAULT }} # name of key vault in Azure portal
         secrets: ARM-ACCESS-KEY, ARM-CLIENT-ID, ARM-CLIENT-SECRET, ARM-SUBSCRIPTION-ID, ARM-TENANT-ID, VM-ACCOUNT, VM-PASSWORD # comma separated list of secret keys to fetch from key vault 
-      id: GetNumptyPasswords # ID for secrets that you will reference
+      id: GetNumptyPasswords # ID for secrets that you will reference...
 
     # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a the IAC spn
     - name: Setup Terraform
