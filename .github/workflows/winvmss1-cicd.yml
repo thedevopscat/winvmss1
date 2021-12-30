@@ -70,7 +70,7 @@ jobs:
     - name: Login via Azure CLI
       uses: Azure/login@v1
       with:
-        credentials: ${{ secrets.AZURE_CREDENTIALS }}
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Get Azure KeyVault Secrets
       uses: Azure/get-keyvault-secrets@v1
