@@ -69,12 +69,12 @@ jobs:
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
       uses: azure/login@v1
-      with:
+      env:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Get Azure KeyVault Secrets
       uses: Azure/get-keyvault-secrets@v1
-      with:
+      env:
         keyvault: ${{ secrets.IAC_KEYVAULT }} # name of key vault in Azure portal
         secrets: ARM-ACCESS-KEY, ARM-CLIENT-ID, ARM-CLIENT-SECRET, ARM-SUBSCRIPTION-ID, ARM-TENANT-ID, VM-ACCOUNT, VM-PASSWORD # comma separated list of secret keys to fetch from key vault 
       id: GetNumptyPasswords # ID for secrets that you will reference
