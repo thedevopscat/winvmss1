@@ -69,7 +69,7 @@ jobs:
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
       uses: Azure/login@v1
-      env:
+      with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Get Azure KeyVault Secrets
