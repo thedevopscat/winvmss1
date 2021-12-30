@@ -1,0 +1,342 @@
+# Pipeline To Deploy A VM That Will Create An Image That Will Be Used By A VMSS For Azure DevOps Self Hosted Agents - Uses Terraform With Approval Required For Deployment
+variables: 
+  - group: terraform-arm-client-config-msdn
+  - name: service
+    value: winvmss1
+  - name: environment
+    value: msdn 
+  - name: codePath
+    value: az/$(service)/images/$(environment)
+  - name: terraformVersion
+    value: 1.1.2
+  - name: buildArtifactName
+    value: $(service) $(environment) Artifact
+  - name: checkovFramework
+    value: terraform
+  - name: IMAGE_RG
+    value: dk-$(service)-images-$(environment)-weu-rg
+  - name: IMAGE_LOCATION
+    value: westeurope
+  - name: IMAGE_NAME
+    value: $(date +%d%m%Y)$(service)
+  - name: VMSS_RG
+    value: dk-$(service)-$(environment)-weu-rg
+  - name: VMSS_NAME
+    value: dk-$(service)-$(environment)-weu-vmss
+  - name: TEMP_IMAGE
+    value: tempswapimage$(date +%d%m%Y)
+pool:
+  vmImage: ubuntu-latest
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - az/winvmss1/images/msdn/*
+    exclude:
+      - az/winvmss1/images/msdn/README.md
+# schedules:
+#   - cron: "0 2 */3 * *" # https://docs.microsoft.com/en-us/azure/devops/pipelines/process/scheduled-triggers?view=azure-devops&tabs=yaml#cron-syntax
+#     displayName: 2AM Every 3 Days
+#     branches:
+#       include: 
+#         - main
+#     always: true
+name: $(service)-$(environment)-image-run$(Rev:rr)
+stages:
+  - stage: code_quality_check_stage
+    displayName: Continuous Integration
+    jobs:
+      - job: code_quality_check_job
+        displayName: Code Quality Check
+        steps:
+          - checkout: self
+            fetchDepth: 1
+          - bash: |
+              mkdir "CheckovReport"
+              docker run --volume $(System.DefaultWorkingDirectory):/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework $(checkovFramework) --output junitxml --config-file /checkovvol/$(codePath)/checkov/checkov.yaml > $(System.DefaultWorkingDirectory)/CheckovReport/Checkov-Report.xml
+            displayName: Checkov Static Code Analysis
+          - bash: |
+              docker run --tty --volume $(System.DefaultWorkingDirectory):/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework $(checkovFramework) --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
+            displayName: Checkov Static Code Analysis CLI
+            condition: succeededOrFailed()  
+          - task: PublishTestResults@2
+            displayName: "Publish Test Results"
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "**/Checkov-Report.xml"
+              searchFolder: $(System.DefaultWorkingDirectory)/CheckovReport
+              mergeTestResults: false
+              testRunTitle: Checkov Scan
+              failTaskOnFailedTests: false
+              publishRunAttachments: true
+          - script: |
+              curl https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip --output $(Agent.WorkFolder)/terraform.zip
+              unzip ./terraform.zip
+              chmod a+x ./terraform
+            workingDirectory: $(Agent.WorkFolder)
+            displayName: Configure Terraform Version
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform init
+            displayName: Terraform Init
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+            env:
+              ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform validate
+            displayName: Terraform Validate
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform fmt -check
+            displayName: Terraform Fmt
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform plan
+            displayName: Terraform Plan
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+            env:
+              ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+              ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+              ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+              ARM_TENANT_ID: $(ARM-TENANT-ID)
+          - task: CopyFiles@2
+            displayName: "Copy Files To Publish As Pipeline Artifact"
+            inputs:
+              sourceFolder: $(codePath)
+              contents: |
+                **
+                !.terraform/**/*
+              targetFolder: $(Build.ArtifactStagingDirectory)/$(codePath)
+              cleanTargetFolder: true
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Pipeline Artifact
+            inputs:
+              targetPath: $(Build.ArtifactStagingDirectory)
+              artifact: $(buildArtifactName)
+              publishLocation: pipeline
+  - stage: deploy_code_stage
+    displayName: Continuous Deployment
+    jobs:
+      - deployment: ${{ variables.service }}_images_${{ variables.environment }}_deployment
+        displayName: Deploy Code
+        environment: vmss_image
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    curl https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip --output $(Agent.WorkFolder)/terraform.zip
+                    unzip ./terraform.zip
+                    chmod a+x ./terraform
+                  workingDirectory: $(Agent.WorkFolder)
+                  displayName: Configure Terraform Version
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform init
+                  displayName: Terraform Init
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform plan
+                  displayName: Terraform Plan
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform apply -auto-approve
+                  displayName: Terraform Apply
+                  timeoutInMinutes: 58
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+                    VM_ACCOUNT: $(VM-ACCOUNT)
+                    VM_PASSWORD: $(VM-PASSWORD)
+                - task: PowerShell@2
+                  displayName: Get Terraform Outputs
+                  inputs:
+                    targetType: inline
+                    script: |
+                      echo "##vso[task.setvariable variable=TF_OUT_BUILD_RESOURCE_GROUP]$($(Agent.WorkFolder)/terraform output build_resource_group)"
+                      echo "##vso[task.setvariable variable=TF_OUT_BUILD_VM_NAME]$($(Agent.WorkFolder)/terraform output build_vm_name)"
+                      echo "##vso[task.setvariable variable=TF_OUT_BUILD_VM_ID]$($(Agent.WorkFolder)/terraform output build_vm_id)"
+                    workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                    failOnStderr: true
+                    showWarnings: true
+                    pwsh: true
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                - task: AzureCLI@2
+                  displayName: Deallocate VM Once Stopped
+                  timeoutInMinutes: 20
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      if [[ `az vm show --resource-group $(TF_OUT_BUILD_RESOURCE_GROUP) --name $(TF_OUT_BUILD_VM_NAME) --show-details --query powerState` != '"VM deallocated"' ]]; then
+                          echo $(date +"%d-%m-%Y %T") "Waiting For VM To Stop - This Step Can Take A Few Minutes To Complete"
+                          while [[ `az vm show --resource-group $(TF_OUT_BUILD_RESOURCE_GROUP) --name $(TF_OUT_BUILD_VM_NAME) --show-details --query powerState` != '"VM stopped"' ]]; do
+                              sleep 10
+                          done
+                          echo $(date +"%d-%m-%Y %T") "Deallocating VM"
+                          az vm deallocate --resource-group $(TF_OUT_BUILD_RESOURCE_GROUP) --name $(TF_OUT_BUILD_VM_NAME)
+                      else
+                          echo $(date +"%d-%m-%Y %T") "VM Already Deallocated"
+                      fi
+                - task: AzureCLI@2
+                  displayName: Generalize VM
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo $(date +"%d-%m-%Y %T") "Generalizing VM"
+                      az vm generalize --resource-group $(TF_OUT_BUILD_RESOURCE_GROUP) --name $(TF_OUT_BUILD_VM_NAME)
+                - task: AzureCLI@2
+                  displayName: Check Todays Image Isn't In Use
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo $(date +"%d-%m-%Y %T") "Checking If VMSS Exists"
+                      az vmss show --resource-group $VMSS_RG --name $VMSS_NAME 2> /dev/null
+                      if [ $? != 0 ]; then 
+                          echo $(date +"%d-%m-%Y %T") "VMSS Does Not Exist - No Running Image To Check"
+                          echo $(date +"%d-%m-%Y %T") "Checking If Todays Image Is Orphaned"
+                          if [[ `az image list --resource-group $IMAGE_RG --query '[].name' -o tsv 2> /dev/null` == *$(date +%d%m%Y)winvmss1 ]]; then
+                              echo $(date +"%d-%m-%Y %T") "Orphaned Image Exists - Deleting"
+                              az image delete --resource-group $IMAGE_RG --name $(date +%d%m%Y)winvmss1
+                          else
+                              echo $(date +"%d-%m-%Y %T") "No Orphaned Image Found"
+                          fi
+                      else
+                          if [[ `az vmss show --resource-group $VMSS_RG --name $VMSS_NAME --query virtualMachineProfile.storageProfile.imageReference.id -o tsv` == *$(date +%d%m%Y)winvmss1 ]]; then
+                              echo $(date +"%d-%m-%Y %T") "VMSS Running Todays Image - Creating & Applying Temp Swapout Image"
+                              az image create --resource-group $(IMAGE_RG) --name $(TEMP_IMAGE) --os-disk-caching ReadOnly --os-type Linux --source $(TF_OUT_BUILD_VM_ID)
+                              az vmss update --name $VMSS_NAME --resource-group $VMSS_RG --set virtualMachineProfile.storageProfile.imageReference.id="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$(IMAGE_RG)/providers/Microsoft.Compute/images/$(TEMP_IMAGE)"
+                              while [[ `az vmss show --resource-group $VMSS_RG --name $VMSS_NAME --query virtualMachineProfile.storageProfile.imageReference.id -o tsv` == *$(date +%d%m%Y)winvmss1 ]]; do
+                                  sleep 10
+                              done
+                              echo $(date +"%d-%m-%Y %T") "Allowing Azure 10 Seconds To Catch Up"
+                              sleep 10 
+                              echo $(date +"%d-%m-%Y %T") "Deleting Todays Image"
+                              az image delete --resource-group $IMAGE_RG --name $(date +%d%m%Y)winvmss1
+                          else
+                              echo $(date +"%d-%m-%Y %T") "VMSS Running Image: $(az vmss show --resource-group $VMSS_RG --name $VMSS_NAME --query virtualMachineProfile.storageProfile.imageReference.id -o tsv)"
+                          fi
+                      fi
+                  env:
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                - task: AzureCLI@2
+                  displayName: Create VM Images Resource Group
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo $(date +"%d-%m-%Y %T") "Creating VM Images Resource Group $(IMAGE_RG)"
+                      RG_EXISTS=$(az group exists --name $IMAGE_RG)
+                      if ($RG_EXISTS); then
+                          echo $(date +"%d-%m-%Y %T") "Resource Group $IMAGE_RG Already Exists"
+                      else
+                          az group create --location $IMAGE_LOCATION --name $IMAGE_RG
+                      fi
+                - task: AzureCLI@2
+                  displayName: Create VMSS Image
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo $(date +"%d-%m-%Y %T") "Creating New Image $(IMAGE_NAME) To Be Used By The VMSS"
+                      az image create --resource-group $(IMAGE_RG) --name $(IMAGE_NAME) --os-disk-caching ReadOnly --os-type Linux --source $(TF_OUT_BUILD_VM_ID)
+                # - task: AzureCLI@2
+                  # displayName: Create Demo VMSS Images
+                  # inputs:
+                  #   azureSubscription: dk-iac-msdn-access
+                  #   scriptType: bash
+                  #   scriptLocation: inlineScript
+                  #   inlineScript: |
+                  #     echo $(date +"%d-%m-%Y %T") "Creating Demo Images To Show Deletion Logic"
+                  #     az image create --resource-group $(IMAGE_RG) --name 27112021winvmss1 --os-disk-caching ReadOnly --os-type Linux --source $(TF_OUT_BUILD_VM_ID)
+                  #     az image create --resource-group $(IMAGE_RG) --name 11122021winvmss1 --os-disk-caching ReadOnly --os-type Linux --source $(TF_OUT_BUILD_VM_ID)
+                  #     az image create --resource-group $(IMAGE_RG) --name 14122021winvmss1 --os-disk-caching ReadOnly --os-type Linux --source $(TF_OUT_BUILD_VM_ID)
+                  #     az image create --resource-group $(IMAGE_RG) --name 16122021winvmss1 --os-disk-caching ReadOnly --os-type Linux --source $(TF_OUT_BUILD_VM_ID)
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform state rm azurerm_virtual_machine_extension.stw_wrapper
+                    $(Agent.WorkFolder)/terraform destroy -auto-approve
+                  displayName: Terraform Destroy
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+                - script: |
+                    sleep 60 
+                    $(Agent.WorkFolder)/terraform state rm azurerm_virtual_machine_extension.stw_wrapper
+                    $(Agent.WorkFolder)/terraform destroy -auto-approve
+                  condition: failed()
+                  displayName: Destroy After Failure
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+      - deployment: ${{ variables.service }}_images_${{ variables.environment }}_cleanup_deployment
+        displayName: Cleanup Borkages
+        condition: failed()
+        dependsOn: ${{ variables.service }}_images_${{ variables.environment }}_deployment
+        environment: vmss_image
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: Cleanup Failed Terraform
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo $(date +"%d-%m-%Y %T") "Release State Lock"
+                      az storage blob lease break --blob-name "winvmss1-msdn.terraform.tfstate" --container-name "dk-iac-msdn-stor-blob" --account-name "dkiacmsdnstor" --account-key $(ARM-ACCESS-KEY) --auth-mode key
+                      az storage blob delete --name "winvmss1-msdn.terraform.tfstate" --container-name "dk-iac-msdn-stor-blob" --account-name "dkiacmsdnstor" --account-key $(ARM-ACCESS-KEY) --auth-mode key
+                      az group delete --resource-group "dk-winvmss1-msdn-weu-rg"  --yes --subscription "David Kent msdn" 
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                # - script: |
+                #     sleep 60 
+                #     $(Agent.WorkFolder)/terraform state rm azurerm_virtual_machine_extension.stw_wrapper
+                #     $(Agent.WorkFolder)/terraform destroy -auto-approve
+                #   displayName: Destroy After Failure
+                #   workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                #   env:
+                #     ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                #     ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                #     ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                #     ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                #     ARM_TENANT_ID: $(ARM-TENANT-ID)

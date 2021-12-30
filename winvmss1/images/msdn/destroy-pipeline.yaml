@@ -1,0 +1,395 @@
+# Pipeline Rename Has To Be Done In The UI See https://github.com/julie-ng/azure-pipelines-monorepo#rename-your-pipelines
+# Secrets Need To Be Explcitly Mapped To The Environment Variables Per Step - So Must Be Added For Each Terraform Command https://youtu.be/55A6v0mu64g?t=180 & https://github.com/Azure/devops-governance/tree/main/azure-pipelines#pipeline-secrets-and-azure-key-vault-integration
+# Reference Secret Variables In Variable Groups https://docs.microsoft.com/en-us/azure/devops/pipelines/process/variables?view=azure-devops&tabs=yaml%2Cbatch#reference-secret-variables-in-variable-groups
+
+# Pipeline To Deploy Terraform Code With Approval Required For Deployment
+
+# ----------------------
+# Build Numbering Format
+# ----------------------
+
+name: $(service)-$(environment)-run$(rev:rr)
+
+# -------------------------
+# Trigger Pipeline Manually
+# -------------------------
+
+trigger: none
+
+# ------------------------------------------------------------------------------------------------------
+# Variables (Can Be Defined At The Pipeline, Stage Or Job Level - The Most Locally Scoped Variable Wins)
+# ------------------------------------------------------------------------------------------------------
+
+variables:
+
+  # ---------------------------------------------------------
+  # --- Pipeline Specific Variables - Modify Per Pipeline ---
+  # ---------------------------------------------------------
+
+  - name: terraformVersion
+    value: 1.1.2 # Always Set This To The Latest Version Of Terraform Available - Unless You Specifically Require A Legacy Version & Have Pinned The Dependency In Your Code
+
+  - name: service
+    value: winvmss1 # The Name Of The Service Being Provisioned
+
+  - name: environment # Valid Names May Only Contain Alphanumeric Characters & '_' & May Not Start With A Number
+    value: msdn       # The Environment The Service Is Being Provisioned & The Required Approvers - All Networks Are Production Infrastructure
+
+  # -------------------------------------------------------------------------------------
+  # --- Variable Groups - Configured In Azure DevOps Library Outside Of This Pipeline ---
+  # -------------------------------------------------------------------------------------
+
+  - group: terraform-arm-client-config-msdn # Pulls Secrets From A Keyvault Used For Terraform Environment Variables
+
+  # ----------------------------------
+  # --- Generic Pipeline Variables ---
+  # ----------------------------------
+
+  - name: codePath
+    value: az/$(service)/$(environment)
+
+  - name: buildArtifactName
+    value: $(service) $(environment) Artifact
+
+  - name: checkovFramework
+    value: terraform # Which Framework(s) Should Checkov Test Against - By Setting This You Speed Up The Testing Time As Checkov Can Test: cloudformation, terraform, kubernetes, serverless, arm, terraform_plan, helm, dockerfile, secrets, all
+
+# --------------------------------------------------------------------------------------------------------
+# Stages (Logical Boundaries In Your Pipeline Where You Can Pause The Pipeline And Perform Various Checks)
+# --------------------------------------------------------------------------------------------------------
+
+stages:
+
+  # ---------------------------------
+  # --- Stage: Code Quality Check ---
+  # ---------------------------------
+
+  - stage: code_quality_check_stage # Valid Names May Only Contain Alphanumeric Characters & '_' & May Not Start With A Number
+    displayName: Code Quality Check # UI Stage Display Name
+
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+    # Jobs (A Job Is A Collection Of Steps Run By An Agent Or On A Server. When Using Microsoft-hosted Agents Each Job In A Pipeline Gets A Fresh Agent)
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+
+    jobs:
+
+    # -------------------------------
+    # --- Job: Code Quality Check ---
+    # -------------------------------
+
+      - job: code_quality_check_job     # Name Of The Job (A-Z, a-z, 0-9, & Underscore)
+        displayName: Code Quality Check # UI Job Display Name
+        pool:
+          vmImage: ubuntu-latest
+
+        # ----------------------------------------------------------------------------------------------------------------------------------------
+        # Steps (Each Step Runs In Its Own Process On An Agent - Environment Variables Aren't Preserved Between Steps But File System Changes Are)
+        # ----------------------------------------------------------------------------------------------------------------------------------------
+
+        steps:
+
+          # --------------------------------------------------------------------------------------------------------------
+          # --- Step 1: Limit How Much Git History Is Downloaded Using Shallow Fetch To Only Pull Down The Last Commit ---
+          # --------------------------------------------------------------------------------------------------------------
+
+          - checkout: self # self Represents The Repo Where The Pipeline YAML File Is Located
+            fetchDepth: 1  # The Depth Of Commit History To Ask Git To Fetch - 1 Is The Latest Commit Only
+
+          # ---------------------------------------------------------------------------
+          # --- Step 2: Checkov Static Code Analysis & Output To Checkov-Report.xml ---
+          # ---------------------------------------------------------------------------
+
+          - bash: |
+              mkdir "CheckovReport"
+              docker run --volume $(System.DefaultWorkingDirectory):/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework $(checkovFramework) --output junitxml --config-file /checkovvol/$(codePath)/checkov/checkov.yaml > $(System.DefaultWorkingDirectory)/CheckovReport/Checkov-Report.xml
+            displayName: Checkov Static Code Analysis
+          # The Command Below Can Be Used To Run Checkov Locally Via A Docker Container When In The Same Directory As The Code:
+          # docker run --volume $(pwd):/checkovvol bridgecrew/checkov:latest --directory /checkovvol --framework terraform --output junitxml --config-file ./checkovvol/checkov/checkov.yaml > ./checkov/Checkov-Report.xml
+
+          # -------------------------------------------------------------------------------------------------------------------------------------------------
+          # --- Step 3: Checkov Static Code Analysis & Output To CLI - (Not Strictly Needed As JUnit Output Includes URLs But CLI Has Them As Hyperlinks) ---
+          # -------------------------------------------------------------------------------------------------------------------------------------------------
+
+          - bash: |
+              docker run --tty --volume $(System.DefaultWorkingDirectory):/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework $(checkovFramework) --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
+            displayName: Checkov Static Code Analysis CLI
+            condition: succeededOrFailed()  
+          # The Command Below Can Be Used To Run Checkov Locally Via A Docker Container When In The Same Directory As The Code:
+          # docker run --volume $(pwd):/checkovvol bridgecrew/checkov:latest --directory /checkovvol --framework terraform --output cli --config-file ./checkovvol/checkov/checkov.yaml --compact --quiet
+
+          # ------------------------------------------------------------------------------
+          # --- Step 4: Publish Checkov-Report.xml Test Results To The Azure DevOps UI ---
+          # ------------------------------------------------------------------------------
+
+          - task: PublishTestResults@2
+            displayName: "Publish Test Results"
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: "JUnit" # Options JUnit, NUnit, VSTest, xUnit, cTest
+              testResultsFiles: "**/Checkov-Report.xml"
+              searchFolder: $(System.DefaultWorkingDirectory)/CheckovReport
+              mergeTestResults: false
+              testRunTitle: Checkov Scan
+              failTaskOnFailedTests: false
+              publishRunAttachments: true
+
+          # ---------------------------------------------------------------------
+          # --- Step 5: Configure Terraform Version & Download To Build Agent ---
+          # ---------------------------------------------------------------------
+
+          - task: TerraformInstaller@0
+            inputs:
+              terraformVersion: $(terraformVersion)
+            displayName: Configure Terraform Version & Download To Build Agent
+
+          # ------------------------------
+          # --- Step 6: Terraform Init ---
+          # ------------------------------
+
+          - script: |
+              terraform version
+              terraform init
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+            failOnStderr: true
+            displayName: Terraform Init
+            env:
+              ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+              ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+              ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+              ARM_TENANT_ID: $(ARM-TENANT-ID)
+
+          # ----------------------------------
+          # --- Step 7: Terraform Validate ---
+          # ----------------------------------
+
+          - script: |
+              terraform version
+              terraform validate
+            displayName: Terraform Validate
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+
+          # ---------------------------------------------------------------------------------------------------------------------
+          # --- Step 8: Terraform Fmt - To Check The Code Is Linted Correctly & Formatted To The HCL Canonical Format & Style ---
+          # ---------------------------------------------------------------------------------------------------------------------
+
+          - script: |
+              terraform version
+              terraform fmt -check
+            displayName: Terraform Fmt
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+
+          # --------------------------------------
+          # --- Step 9: Terraform Plan Destroy ---
+          # --------------------------------------
+
+          - script: |
+              terraform version
+              terraform plan -destroy
+            displayName: Terraform Plan Destroy
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+            env:
+              ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+              ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+              ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+              ARM_TENANT_ID: $(ARM-TENANT-ID)
+
+  # ---------------------------
+  # --- Stage: Build Review ---
+  # ---------------------------
+
+  - stage: build_review_stage # Valid Names May Only Contain Alphanumeric Characters & '_' & May Not Start With A Number
+    displayName: Build Review # UI Stage Display Name
+    dependsOn: code_quality_check_stage
+
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+    # Jobs - A Job Is A Collection Of Steps Run By An Agent Or On A Server. When Using Microsoft-hosted Agents Each Job In A Pipeline Gets A Fresh Agent
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+
+    jobs:
+
+    # -------------------------
+    # --- Job: Build Review ---
+    # -------------------------
+
+      - job: build_review_job     # Name Of The Job (A-Z, a-z, 0-9, & Underscore)
+        displayName: Build Review # UI Job Display Name
+        pool: server
+        timeoutInMinutes: 490 # Job Times Out After 8 Hours 10 Minutes
+
+        # ----------------------------------------------------------------------------------------------------------------------------------------
+        # Steps (Each Step Runs In Its Own Process On An Agent - Environment Variables Aren't Preserved Between Steps But File System Changes Are)
+        # ----------------------------------------------------------------------------------------------------------------------------------------
+
+        steps:
+
+          # --------------------------------------------------------------------------
+          # --- Step 1: Review The Build To Ensure The Intended Outcome Is Desired ---
+          # --------------------------------------------------------------------------
+
+          - task: ManualValidation@0
+            displayName: "Build Review"
+            timeoutInMinutes: 480 # Task Times Out In 8 Hours
+            inputs:
+              notifyUsers: ""
+              instructions: |
+                Please review the "Terraform Plan" output from the Code Quality Check stage within 8 hours to ensure the outcome is exactly what is desired. 
+                
+                By clicking "Resume" you are confirming and accepting that the displayed outcome is exactly what you intended. 
+                
+                If in doubt, click "Reject" and review before continuing.
+              onTimeout: "reject"
+
+  # ------------------------------------
+  # --- Stage: Create Build Artifact ---
+  # ------------------------------------
+
+  - stage: create_build_artifact_stage # Valid Names May Only Contain Alphanumeric Characters & '_' & May Not Start With A Number
+    displayName: Create Build Artifact # UI Stage Display Name
+    dependsOn: build_review_stage
+
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+    # Jobs - A Job Is A Collection Of Steps Run By An Agent Or On A Server. When Using Microsoft-hosted Agents Each Job In A Pipeline Gets A Fresh Agent
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+
+    jobs:
+
+    # ----------------------------------
+    # --- Job: Create Build Artifact ---
+    # ----------------------------------
+
+      - job: create_build_artifact_job     # Name Of The Job (A-Z, a-z, 0-9, & Underscore)
+        displayName: Create Build Artifact # UI Job Display Name
+        pool:
+          vmImage: ubuntu-latest
+
+        # ----------------------------------------------------------------------------------------------------------------------------------------
+        # Steps (Each Step Runs In Its Own Process On An Agent - Environment Variables Aren't Preserved Between Steps But File System Changes Are)
+        # ----------------------------------------------------------------------------------------------------------------------------------------
+
+        steps:
+
+          # --------------------------------------------------------------------------------------------------------------
+          # --- Step 1: Limit How Much Git History Is Downloaded Using Shallow Fetch To Only Pull Down The Last Commit ---
+          # --------------------------------------------------------------------------------------------------------------
+
+          - checkout: self # self Represents The Repo Where The Pipeline YAML File Is Located
+            fetchDepth: 1  # The Depth Of Commit History To Ask Git To Fetch - 1 Is The Latest Commit Only
+
+          # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+          # --- Step 2: Copy Files (Excluding .terraform) To: $(Build.ArtifactStagingDirectory)/$(codePath) - https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/utility/copy-files?view=azure-devops&tabs=yaml ---
+          # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+          - task: CopyFiles@2
+            displayName: "Copy Files To Publish As Pipeline Artifact"
+            inputs:
+              sourceFolder: $(codePath)
+              contents: |
+                **
+                !.terraform/**/*
+              targetFolder: $(Build.ArtifactStagingDirectory)/$(codePath)
+              cleanTargetFolder: true
+
+          # -----------------------------------------
+          # --- Step 3: Publish Pipeline Artifact ---
+          # -----------------------------------------
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Pipeline Artifact
+            inputs:
+              targetPath: $(Build.ArtifactStagingDirectory)
+              artifact: $(buildArtifactName)
+              publishLocation: pipeline
+
+  # --------------------------------
+  # --- Stage: Destroy Resources ---
+  # --------------------------------
+
+  - stage: destroy_resources_stage
+    displayName: Destroy Resources
+
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+    # Jobs (A Job Is A Collection Of Steps Run By An Agent Or On A Server. When Using Microsoft-hosted Agents Each Job In A Pipeline Gets A Fresh Agent)
+    # --------------------------------------------------------------------------------------------------------------------------------------------------
+
+    jobs:
+
+    # ------------------------------
+    # --- Job: Destroy Resources ---
+    # ------------------------------
+
+      # A Deployment Job Is Recommended For YAML Pipelines - Deployment Jobs Keep History & Allow The Application Of A Deployment Strategy
+      - deployment: ${{ variables.service }}_${{ variables.environment }}_deployment # This is displayed in all deployments to the environment so needs to be specific
+        displayName: Destroy Resources
+        pool:
+          vmImage: ubuntu-latest
+
+        # The Environment That Is Targeted By A Deployment Job - An Environment Holds Information About The Deployment Strategy For Running The Steps Defined Inside The Job
+        environment: zzazuredevopsenvironment # Approvals Are Configured Per Environment & Work Per Stage Not Per Job Or Step
+        strategy:
+          runOnce: # Other Supported Strategies Are: rolling & canary
+            deploy:
+
+              # ----------------------------------------------------------------------------------------------------------------------------------------
+              # Steps - Each Step Runs In Its Own Process On An Agent - Environment Variables Aren't Preserved Between Steps But File System Changes Are
+              # ----------------------------------------------------------------------------------------------------------------------------------------
+
+              steps:
+
+                # ---------------------------------------------------------------------
+                # --- Step 1: Configure Terraform Version & Download To Build Agent ---
+                # ---------------------------------------------------------------------
+
+                - task: TerraformInstaller@0
+                  inputs:
+                    terraformVersion: $(terraformVersion)
+                  displayName: Configure Terraform Version & Download To Build Agent
+
+                # ------------------------------
+                # --- Step 2: Terraform Init ---
+                # ------------------------------
+
+                - script: |
+                    terraform version
+                    terraform init
+                  displayName: Terraform Init
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+
+                # --------------------------------------
+                # --- Step 3: Terraform Plan Destroy ---
+                # --------------------------------------
+
+                - script: |
+                    terraform version
+                    terraform plan -destroy
+                  displayName: Terraform Plan Destroy
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+
+                # ---------------------------------
+                # --- Step 4: Terraform Destroy ---
+                # ---------------------------------
+
+                - script: |
+                    terraform version
+                    terraform destroy -auto-approve
+                  displayName: Terraform Destroy
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)

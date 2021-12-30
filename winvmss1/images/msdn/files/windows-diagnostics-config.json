@@ -1,0 +1,4 @@
+{
+  "xmlCfg": ${xmlCfg},
+  "storageAccount": ${storageAccount}
+}

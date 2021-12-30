@@ -1,0 +1,208 @@
+# Pipeline To Deploy A VMSS For Azure DevOps Self Hosted Agents
+variables: 
+  - group: terraform-arm-client-config-msdn
+  - name: service
+    value: winvmss1
+  - name: environment
+    value: msdn 
+  - name: codePath
+    value: az/$(service)/vmss/$(environment)
+  - name: terraformVersion
+    value: 1.1.0
+  - name: buildArtifactName
+    value: $(service) vmss $(environment) Artifact
+  - name: checkovFramework
+    value: terraform
+  - name: IMAGE_RG
+    value: dk-$(service)-images-$(environment)-weu-rg
+  - name: IMAGE_NAME
+    value: $(date +%d%m%Y)winvmss1
+  - name: VMSS_RG
+    value: dk-$(service)-$(environment)-weu-rg
+  - name: VMSS_NAME
+    value: dk-$(service)-$(environment)-weu-vmss
+trigger: none
+resources: 
+  pipelines:
+  - pipeline: winvmss1-images-msdn-cicd-trigger
+    source: winvmss1-images-msdn-cicd # The Name As Defined In The Azure DevOps Portal Not The YAML File
+    project: aks
+    trigger: true
+name: $(service)-$(environment)-vmss-run$(Rev:rr)
+stages:
+  - stage: code_quality_check_stage
+    displayName: Continuous Integration
+    jobs:
+      - job: code_quality_check_job
+        displayName: Code Quality Check
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+            fetchDepth: 1
+          - bash: |
+              mkdir "CheckovReport"
+              docker run --volume $(System.DefaultWorkingDirectory):/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework $(checkovFramework) --output junitxml --config-file /checkovvol/$(codePath)/checkov/checkov.yaml > $(System.DefaultWorkingDirectory)/CheckovReport/Checkov-Report.xml
+            displayName: Checkov Static Code Analysis
+          - bash: |
+              docker run --tty --volume $(System.DefaultWorkingDirectory):/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework $(checkovFramework) --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
+            displayName: Checkov Static Code Analysis CLI
+            condition: succeededOrFailed()  
+          - task: PublishTestResults@2
+            displayName: "Publish Test Results"
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "**/Checkov-Report.xml"
+              searchFolder: $(System.DefaultWorkingDirectory)/CheckovReport
+              mergeTestResults: false
+              testRunTitle: Checkov Scan
+              failTaskOnFailedTests: false
+              publishRunAttachments: true
+          - task: PowerShell@2
+            displayName: Add ARM_ACCESS_KEY Variable
+            inputs:
+              targetType: inline
+              script: |
+                echo "##vso[task.setvariable variable=ARM_ACCESS_KEY]$(ARM-ACCESS-KEY)"
+              failOnStderr: true
+              showWarnings: true
+              pwsh: true
+          - script: |
+              curl https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip --output $(Agent.WorkFolder)/terraform.zip
+              unzip ./terraform.zip
+              chmod a+x ./terraform
+            workingDirectory: $(Agent.WorkFolder)
+            displayName: Configure Terraform Version
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform init
+            displayName: Terraform Init
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+            env:
+              ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+              ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+              ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+              ARM_TENANT_ID: $(ARM-TENANT-ID)
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform validate
+            displayName: Terraform Validate
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform fmt -check
+            displayName: Terraform Fmt
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+          - script: |
+              $(Agent.WorkFolder)/terraform version
+              $(Agent.WorkFolder)/terraform plan
+            displayName: Terraform Plan
+            workingDirectory: $(System.DefaultWorkingDirectory)/$(codePath)
+            env:
+              ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+              ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+              ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+              ARM_TENANT_ID: $(ARM-TENANT-ID)
+          - task: CopyFiles@2
+            displayName: "Copy Files To Publish As Pipeline Artifact"
+            inputs:
+              sourceFolder: $(codePath)
+              contents: |
+                **
+                !.terraform/**/*
+              targetFolder: $(Build.ArtifactStagingDirectory)/$(codePath)
+              cleanTargetFolder: true
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Pipeline Artifact
+            inputs:
+              targetPath: $(Build.ArtifactStagingDirectory)
+              artifact: $(buildArtifactName)
+              publishLocation: pipeline
+  - stage: deploy_code_stage
+    displayName: Continuous Deployment
+    jobs:
+      - deployment: winvmss1_msdn_deployment
+        displayName: Deploy Code
+        pool:
+          vmImage: ubuntu-latest
+        environment: vmss_image
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: PowerShell@2
+                  displayName: Add ARM_ACCESS_KEY Variable
+                  inputs:
+                    targetType: inline
+                    script: |
+                      echo "##vso[task.setvariable variable=ARM_ACCESS_KEY]$(ARM-ACCESS-KEY)"
+                    failOnStderr: true
+                    showWarnings: true
+                    pwsh: true
+                - script: |
+                    curl https://releases.hashicorp.com/terraform/$(terraformVersion)/terraform_$(terraformVersion)_linux_amd64.zip --output $(Agent.WorkFolder)/terraform.zip
+                    unzip ./terraform.zip
+                    chmod a+x ./terraform
+                  workingDirectory: $(Agent.WorkFolder)
+                  displayName: Configure Terraform Version
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform init
+                  displayName: Terraform Init
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform plan
+                  displayName: Terraform Plan
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+                - script: |
+                    $(Agent.WorkFolder)/terraform version
+                    $(Agent.WorkFolder)/terraform apply -auto-approve
+                  displayName: Terraform Apply
+                  workingDirectory: $(Pipeline.Workspace)/$(buildArtifactName)/$(codePath)
+                  env:
+                    ARM_ACCESS_KEY: $(ARM-ACCESS-KEY)
+                    ARM_CLIENT_ID: $(ARM-CLIENT-ID)
+                    ARM_CLIENT_SECRET: $(ARM-CLIENT-SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM-SUBSCRIPTION-ID)
+                    ARM_TENANT_ID: $(ARM-TENANT-ID)
+                - task: AzureCLI@2
+                  displayName: Confirm Image Has Been Applied To The VMSS
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo $(date +"%d-%m-%Y %T") "Confirming Image Applied"
+                      while [[ `az vmss show --resource-group $VMSS_RG --name $VMSS_NAME --query virtualMachineProfile.storageProfile.imageReference.id -o tsv` != *$(date +%d%m%Y)winvmss1 ]]; do
+                          sleep 10
+                      done
+                - task: AzureCLI@2
+                  displayName: Cleanup Stale Images
+                  inputs:
+                    azureSubscription: dk-iac-msdn-access
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      for image in $(az image list --resource-group $IMAGE_RG --query '[].name' -o tsv)
+                      do
+                          if [[ $image != "$(IMAGE_NAME)" ]] && [[ $image != "$(date -d "3 days ago" +%d%m%Y)winvmss1" ]] && [[ $image != "$(date -d "6 days ago" +%d%m%Y)winvmss1" ]]; then
+                            echo $(date +"%d-%m-%Y %T") "Deleting Stale Image $image"    
+                            az image delete --resource-group $IMAGE_RG --name $image
+                          fi
+                      done
