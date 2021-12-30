@@ -68,7 +68,7 @@ jobs:
     
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
-      uses: azure/login@v1
+      uses: Azure/login@v1
       env:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
