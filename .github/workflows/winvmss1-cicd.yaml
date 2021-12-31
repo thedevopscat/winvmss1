@@ -13,7 +13,7 @@ jobs:
     environment: msdn
     env:
       DARREN_IS: numpty
-      CODE_PATH: winvmss1/images/msdn
+      CODE_PATH: images/msdn
 
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
@@ -31,8 +31,8 @@ jobs:
       run: |
         #echo $DARREN_IS
         echo GITHUB.WORKSPACE IS ${{ GITHUB.WORKSPACE }}
-        echo DAVE PATH IS ${{ GITHUB.WORKSPACE }}/../
-        docker run --tty --volume ${{ GITHUB.WORKSPACE }}/../checkovvol bridgecrew/checkov:latest --directory /checkovvol/${{ env.CODE_PATH }} --framework terraform --config-file /checkovvol/${{ env.CODE_PATH }}/checkov/checkov.yaml --compact --quiet
+        echo CODE_PATH IS $CODE_PATH
+        docker run --tty --volume ${{ GITHUB.WORKSPACE }}/checkovvol bridgecrew/checkov:latest --directory /checkovvol/${{ env.CODE_PATH }} --framework terraform --config-file /checkovvol/${{ env.CODE_PATH }}/checkov/checkov.yaml --compact --quiet
         #condition: succeededOrFailed()  
         # GITHUB.WORKSPACE IS /home/runner/work/winvmss1/winvmss1
     
