@@ -44,6 +44,9 @@ jobs:
       with:
         github_retries: 3
         check_name: Checkov Test Results
+        files: ${{ GITHUB.WORKSPACE }}/${{ env.CODE_PATH }}/CheckovReport/Checkov-Report.xml
+      if: always()
+
     
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
