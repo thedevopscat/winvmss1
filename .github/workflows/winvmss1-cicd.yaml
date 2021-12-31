@@ -1,0 +1,85 @@
+name: 'Terraform'
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+    environment: msdn
+
+    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: winvmss1/images/msdn/
+      env:
+        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
+        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
+        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
+        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
+        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
+        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
+
+    steps:
+    # Checkout the repository to the GitHub Actions runner
+    - name: Checkout
+      uses: actions/checkout@v2
+    
+    # uses the sp output stored as a secret
+    - name: Login via Azure CLI
+      uses: Azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Get Azure KeyVault Secrets
+      uses: Azure/get-keyvault-secrets@v1
+      with:
+        keyvault: ${{ secrets.IAC_KEYVAULT }} # name of key vault in Azure portal
+        secrets: ARM-ACCESS-KEY, ARM-CLIENT-ID, ARM-CLIENT-SECRET, ARM-SUBSCRIPTION-ID, ARM-TENANT-ID, VM-ACCOUNT, VM-PASSWORD # comma separated list of secret keys to fetch from key vault 
+      id: get-terraform-secrets # ID for secrets that you will reference
+
+    # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a the IAC spn
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: 1.1.2 # optional, default is latest
+
+    # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+    - name: Terraform Init
+      run: terraform init  
+
+    # Checks that all Terraform configuration files adhere to a canonical format
+    - name: Terraform Format
+      run: terraform fmt -check
+
+    # Generates an execution plan for Terraform
+    - name: Terraform Plan
+      run: terraform plan
+      env:
+        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
+        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
+        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
+        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
+        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
+        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
+
+      # On push to main, build or change infrastructure according to Terraform configuration files
+      # Note: It is recommended to set up a required "strict" status check in your repository for "Terraform Cloud". See the documentation on "strict" required status checks for more information: https://help.github.com/en/github/administering-a-repository/types-of-required-status-checks
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: terraform apply -auto-approve
+      env:
+        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
+        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
+        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
+        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
+        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
+        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
