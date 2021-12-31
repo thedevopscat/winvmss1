@@ -13,6 +13,7 @@ jobs:
     environment: msdn
     env:
       DARREN_IS: numpty
+      CODE_PATH: $working-directory
 
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
@@ -25,6 +26,12 @@ jobs:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@v2
+      
+    - name: Checkov Static Code Analysis CLI
+      run: |
+        docker run --tty --volume ${{ github.workspace }}/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$(codePath) --framework terraform --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
+        echo $DARREN_IS
+      #condition: succeededOrFailed()  
     
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
