@@ -31,7 +31,7 @@ jobs:
       run: |
         echo $DARREN_IS
         echo GITHUB.WORKSPACE IS ${{ GITHUB.WORKSPACE }}
-        echo GITHUB_WORKSPACE IS ${{ GITHUB_WORKSPACE }}
+        echo env.GITHUB_WORKSPACE IS ${{ env.GITHUB_WORKSPACE }}
         docker run --tty --volume ${{ GITHUB.WORKSPACE }}/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$CODE_PATH --framework terraform --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
         #condition: succeededOrFailed()  
     
