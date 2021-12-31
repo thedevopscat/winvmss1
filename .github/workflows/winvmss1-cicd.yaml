@@ -29,10 +29,10 @@ jobs:
       
     - name: Checkov Static Code Analysis CLI
       run: |
-        #echo $DARREN_IS
-        #echo GITHUB.WORKSPACE IS ${{ GITHUB.WORKSPACE }}
-        #echo CODE_PATH BROKEN IS $CODE_PATH
-        #echo CODE_PATH WORKING IS ${{ env.CODE_PATH }}
+        echo $DARREN_IS
+        echo GITHUB.WORKSPACE IS ${{ GITHUB.WORKSPACE }}
+        echo CODE_PATH BROKEN IS $CODE_PATH
+        echo CODE_PATH WORKING IS ${{ env.CODE_PATH }}
         docker run --tty --volume ${{ GITHUB.WORKSPACE }}:/checkovvol bridgecrew/checkov:latest --directory /checkovvol/${{ env.CODE_PATH }} --framework terraform --config-file /checkovvol/${{ env.CODE_PATH }}/checkov/checkov.yaml --compact --quiet
         #condition: succeededOrFailed()  
         # GITHUB.WORKSPACE IS /home/runner/work/winvmss1/winvmss1
