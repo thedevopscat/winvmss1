@@ -30,7 +30,9 @@ jobs:
     - name: Checkov Static Code Analysis CLI
       run: |
         echo $DARREN_IS
-        docker run --tty --volume ${{ github.workspace }}/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$CODE_PATH --framework terraform --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
+        echo GITHUB.WORKSPACE IS ${{ GITHUB.WORKSPACE }}
+        echo GITHUB_WORKSPACE IS ${{ GITHUB_WORKSPACE }}
+        docker run --tty --volume ${{ GITHUB.WORKSPACE }}/checkovvol bridgecrew/checkov:latest --directory /checkovvol/$CODE_PATH --framework terraform --config-file /checkovvol/$(codePath)/checkov/checkov.yaml --compact --quiet
         #condition: succeededOrFailed()  
     
     # uses the sp output stored as a secret
