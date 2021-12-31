@@ -60,6 +60,7 @@ jobs:
     defaults:
       run:
         shell: bash
+        working-directory: winvmss1/winvmss1/images/msdn/
 
     steps:
     # Checkout the repository to the GitHub Actions runner
@@ -80,7 +81,7 @@ jobs:
       with:
         keyvault: ${{ secrets.IAC_KEYVAULT }} # name of key vault in Azure portal
         secrets: ARM-ACCESS-KEY, ARM-CLIENT-ID, ARM-CLIENT-SECRET, ARM-SUBSCRIPTION-ID, ARM-TENANT-ID, VM-ACCOUNT, VM-PASSWORD # comma separated list of secret keys to fetch from key vault 
-      id: GetNumptyPasswords # ID for secrets that you will reference
+      id: get-terraform-secrets # ID for secrets that you will reference
 
     # Display the event that triggered the workflow
     - run: echo "The job was triggered by a ${{ github.event_name }} event."
@@ -92,7 +93,7 @@ jobs:
     - run: echo "The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
 
     # Information about the repository and branch
-    - run: echo "I sense you password is maybe ${{ steps.GetNumptyPasswords.outputs.VM-PASSWORD }} and your repository is ${{ github.repository }}."
+    - run: echo "I sense you password is maybe ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }} and your repository is ${{ github.repository }}."
     
     - name: conditional step when event name is pull request
       if: ${{ github.event_name == 'pull_request' }}
@@ -139,6 +140,15 @@ jobs:
     # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
     - name: Terraform Init
       run: terraform init
+      env:
+        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
+        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
+        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
+        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
+        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
+        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
+        
 
     # Checks that all Terraform configuration files adhere to a canonical format
     - name: Terraform Format
@@ -148,8 +158,8 @@ jobs:
     - name: Terraform Plan
       run: terraform plan
 
-      # On push to main, build or change infrastructure according to Terraform configuration files
-      # Note: It is recommended to set up a required "strict" status check in your repository for "Terraform Cloud". See the documentation on "strict" required status checks for more information: https://help.github.com/en/github/administering-a-repository/types-of-required-status-checks
-    - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: terraform apply -auto-approve
+    #   # On push to main, build or change infrastructure according to Terraform configuration files
+    #   # Note: It is recommended to set up a required "strict" status check in your repository for "Terraform Cloud". See the documentation on "strict" required status checks for more information: https://help.github.com/en/github/administering-a-repository/types-of-required-status-checks
+    # - name: Terraform Apply
+    #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    #   run: terraform apply -auto-approve
