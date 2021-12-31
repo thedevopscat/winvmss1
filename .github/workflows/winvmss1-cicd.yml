@@ -65,6 +65,9 @@ jobs:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@v2
+    - run: echo "The ${{ github.repository }} repository has been cloned to the runner."
+    - run: echo "Your repository has been copied to the path ${{ github.workspace }} on the runner."
+    - run: echo "The workflow is now ready to test your code on the runner."
     
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
@@ -78,6 +81,54 @@ jobs:
         keyvault: ${{ secrets.IAC_KEYVAULT }} # name of key vault in Azure portal
         secrets: ARM-ACCESS-KEY, ARM-CLIENT-ID, ARM-CLIENT-SECRET, ARM-SUBSCRIPTION-ID, ARM-TENANT-ID, VM-ACCOUNT, VM-PASSWORD # comma separated list of secret keys to fetch from key vault 
       id: GetNumptyPasswords # ID for secrets that you will reference
+
+    - name: Example Outputs
+      # Display the event that triggered the workflow
+      - run: echo "The job was triggered by a ${{ github.event_name }} event."
+      
+      # Runner information
+      - run: echo "This job is now running on a ${{ runner.os }} server hosted by GitHub"
+      
+      # Information about the repository and branch
+      - run: echo "The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+
+      # Information about the repository and branch
+      - run: echo "I sense you password is maybe ${{ steps.GetNumptyPasswords.outputs.VM-PASSWORD }} and your repository is ${{ github.repository }}."
+      
+      - name: conditional step when event name is pull request
+        if: ${{ github.event_name == 'pull_request' }}
+        run: echo "This event is a pull request"
+      
+      - name: List files in the repository
+        run: |
+          ls ${{ github.workspace }}
+      
+      - name: Setup dotnet on runner
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '3.x'
+      
+      - name: Display dotnet version
+        run: dotnet --version
+      
+      - run: echo "The preinstalled tools are located here on the runner ${{ runner.tool_cache }}."
+      
+      - name: List files in tool cache
+        run: |
+          ls ${{ runner.tool_cache }}
+      
+      - run: echo "This job's status is ${{ job.status }}."
+
+    # - uses: Azure/get-keyvault-secrets@v1
+    #   with: 
+    #     keyvault: "containervault"
+    #     secrets: 'containerPassword, containerUsername'
+    #   id: myGetSecretAction
+    # - uses: azure/docker-login@v1
+    #   with:
+    #     login-server: myregistry.azurecr.io
+    #     username: ${{ steps.myGetSecretAction.outputs.containerUsername }}
+    #     password: ${{ steps.myGetSecretAction.outputs.containerPassword }}
 
     # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a the IAC spn
     - name: Setup Terraform
