@@ -60,7 +60,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: winvmss1/winvmss1/images/msdn/
+        working-directory: winvmss1/images/msdn/
 
     steps:
     # Checkout the repository to the GitHub Actions runner
