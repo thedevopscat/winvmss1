@@ -12,13 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: msdn
     env:
-        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
-        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
-        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
-        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
-        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
-        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
-        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
+      DARREN_IS: numpty
+
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -52,7 +47,15 @@ jobs:
 
     # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
     - name: Terraform Init
-      run: terraform init  
+      run: terraform init
+      env:
+        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
+        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
+        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
+        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
+        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
+        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
 
     # Checks that all Terraform configuration files adhere to a canonical format
     - name: Terraform Format
