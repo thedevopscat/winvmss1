@@ -31,8 +31,10 @@ jobs:
       run: |
         #echo $DARREN_IS
         echo GITHUB.WORKSPACE IS ${{ GITHUB.WORKSPACE }}
-        docker run --tty --volume ${{ GITHUB.WORKSPACE }}/checkovvol bridgecrew/checkov:latest --directory /checkovvol/${{ env.CODE_PATH }} --framework terraform --config-file /checkovvol/${{ env.CODE_PATH }}/checkov/checkov.yaml --compact --quiet
+        echo DAVE PATH IS ${{ GITHUB.WORKSPACE }}/../
+        docker run --tty --volume ${{ GITHUB.WORKSPACE }}/../checkovvol bridgecrew/checkov:latest --directory /checkovvol/${{ env.CODE_PATH }} --framework terraform --config-file /checkovvol/${{ env.CODE_PATH }}/checkov/checkov.yaml --compact --quiet
         #condition: succeededOrFailed()  
+        # GITHUB.WORKSPACE IS /home/runner/work/winvmss1/winvmss1
     
     # uses the sp output stored as a secret
     - name: Login via Azure CLI
