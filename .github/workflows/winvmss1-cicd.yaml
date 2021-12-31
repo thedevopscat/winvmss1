@@ -20,7 +20,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: $CODE_PATH
+        working-directory: ${{ env.CODE_PATH }}
 
     steps:
     # Checkout the repository to the GitHub Actions runner
