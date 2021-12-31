@@ -11,13 +11,7 @@ jobs:
     name: 'Terraform'
     runs-on: ubuntu-latest
     environment: msdn
-
-    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
-    defaults:
-      run:
-        shell: bash
-        working-directory: winvmss1/images/msdn/
-      env:
+    env:
         ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
         ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
         ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
@@ -25,6 +19,12 @@ jobs:
         ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
         VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
         VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
+
+    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: winvmss1/images/msdn/
 
     steps:
     # Checkout the repository to the GitHub Actions runner
