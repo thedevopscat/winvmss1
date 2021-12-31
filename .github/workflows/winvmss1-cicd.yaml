@@ -20,7 +20,7 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: winvmss1/images/msdn/
+        working-directory: $CODE_PATH
 
     steps:
     # Checkout the repository to the GitHub Actions runner
