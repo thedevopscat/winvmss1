@@ -82,7 +82,6 @@ jobs:
         secrets: ARM-ACCESS-KEY, ARM-CLIENT-ID, ARM-CLIENT-SECRET, ARM-SUBSCRIPTION-ID, ARM-TENANT-ID, VM-ACCOUNT, VM-PASSWORD # comma separated list of secret keys to fetch from key vault 
       id: GetNumptyPasswords # ID for secrets that you will reference
 
-    - name: Example Outputs
     # Display the event that triggered the workflow
     - run: echo "The job was triggered by a ${{ github.event_name }} event."
     
