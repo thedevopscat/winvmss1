@@ -12,11 +12,9 @@ resource "azurerm_storage_account" "winvmss1_msdn" {
   #checkov:skip=CKV_AZURE_35:this would be handled via azurerm_storage_account_network_rules
   #checkov:skip=CKV_AZURE_43:the storage account name is created dynamically, this checks it is < 24 characters
   #checkov:skip=CKV2_AZURE_1:customer managed keys are not part of our company strategy
-
+  #checkov:skip=CKV2_AZURE_8:this would be handled via azurerm_storage_container
+  #checkov:skip=CKV2_AZURE_18:customer managed keys are not part of our company strategy
 }
-
-#checkov:skip=CKV2_AZURE_8:this would be handled via azurerm_storage_container
-#checkov:skip=CKV2_AZURE_18:customer managed keys are not part of our company strategy
 
 resource "azurerm_storage_container" "winvmss1_msdn" {
   name                  = lower(join("-", [var.company_code, substr(var.tags["service"], 0, 10), substr(var.tags["environment"], 0, 7), "stor-blob"]))
