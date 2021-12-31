@@ -157,6 +157,14 @@ jobs:
     # Generates an execution plan for Terraform
     - name: Terraform Plan
       run: terraform plan
+      env:
+        ARM_ACCESS_KEY: ${{ steps.get-terraform-secrets.outputs.ARM-ACCESS-KEY }}
+        ARM_CLIENT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-ID }}
+        ARM_CLIENT_SECRET: ${{ steps.get-terraform-secrets.outputs.ARM-CLIENT-SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ steps.get-terraform-secrets.outputs.ARM-SUBSCRIPTION-ID }}
+        ARM_TENANT_ID: ${{ steps.get-terraform-secrets.outputs.ARM-TENANT-ID }}
+        VM_ACCOUNT: ${{ steps.get-terraform-secrets.outputs.VM-ACCOUNT }}
+        VM_PASSWORD: ${{ steps.get-terraform-secrets.outputs.VM-PASSWORD }}
 
     #   # On push to main, build or change infrastructure according to Terraform configuration files
     #   # Note: It is recommended to set up a required "strict" status check in your repository for "Terraform Cloud". See the documentation on "strict" required status checks for more information: https://help.github.com/en/github/administering-a-repository/types-of-required-status-checks
